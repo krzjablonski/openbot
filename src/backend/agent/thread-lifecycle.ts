@@ -578,6 +578,8 @@ export class ThreadLifecycle {
     const section = this.#sectionTeammates(agent.id);
     // Read before the configuration, which starts the same listener: both see one port.
     const proxy = client.provider === "codex" ? yield* this.#proxyFingerprint(mcpServers) : null;
+    // The same single reading, so the manifest records the text that these instructions carry.
+    const globalInstructions = this.#store.globalInstructions();
     const config = yield* this.codexConfigEffect(agent, client, mcpServers, own, toolRuntimes, environment);
     const params: DynamicRecord = {
       ...config,
@@ -598,11 +600,12 @@ export class ThreadLifecycle {
         yield* this.#homeSkills(agent, client),
         this.#conversation.isTaskThread(publicThreadId),
         mcpServers,
+        globalInstructions,
       ),
       serviceName: "openbot",
       dynamicTools: VISIBLE_DYNAMIC_TOOLS,
     };
-    return { agent, mcpServers, toolRuntimes, own, environment, section, proxy, params };
+    return { agent, mcpServers, toolRuntimes, own, environment, section, proxy, globalInstructions, params };
   });
 
   readonly #startProviderThread = Effect.fn("ThreadLifecycle.prepareProviderThread")(function* (
@@ -612,11 +615,8 @@ export class ThreadLifecycle {
     publicThreadId: string,
     reason?: "configuration-change" | "missing-session",
   ) {
-    const { agent, mcpServers, toolRuntimes, own, environment, section, proxy, params } = yield* this.#startParams(
-      owner,
-      client,
-      publicThreadId,
-    );
+    const { agent, mcpServers, toolRuntimes, own, environment, section, proxy, globalInstructions, params } =
+      yield* this.#startParams(owner, client, publicThreadId);
     const response = yield* client
       .request("thread/start", { ...params, ephemeral: false }, decodeThreadResponse)
       .pipe(toThreadOperationFailed);
@@ -643,7 +643,17 @@ export class ThreadLifecycle {
           const approvals = this.#toolApprovals(mcpServers, own);
           yield* this.#writeToolManifest(
             externalThreadId,
-            this.toolFingerprint(agent, mcpServers, own, approvals, toolRuntimes, environment, section, proxy),
+            this.toolFingerprint(
+              agent,
+              mcpServers,
+              own,
+              approvals,
+              toolRuntimes,
+              environment,
+              section,
+              proxy,
+              globalInstructions,
+            ),
             approvals,
           );
         }
@@ -688,7 +698,7 @@ export class ThreadLifecycle {
       return yield* prepared.failure;
     }
     this.#conversation.bindThread(externalThreadId, agent.id, publicThreadId);
-    this.#conversation.markThreadLoaded(externalThreadId, client);
+    this.#markLoadedWithGlobalInstructions(externalThreadId, client, globalInstructions);
     this.#conversation.ensureSnapshot(agent.id, publicThreadId);
     if (replaced) yield* this.#archiveReplacedSession(client, replaced.externalSessionId);
     return externalThreadId;
@@ -897,6 +907,7 @@ export class ThreadLifecycle {
     environment: Readonly<Record<string, string>>,
     section: SectionTeammates | null,
     proxy: string | null,
+    globalInstructions: string,
   ): string {
     const folders = existingAgentFolders(agent);
     const excluded = workspaceExcludedFolders(agent);
@@ -927,6 +938,9 @@ export class ThreadLifecycle {
           ...(Object.keys(environment).length > 0 ? [Object.entries(environment).sort()] : []),
           ...(section ? [section.members.map((member) => member.id).sort()] : []),
           ...(proxy ? [proxy] : []),
+          // Codex keeps the developer instructions of a loaded session, so the user's global
+          // text goes in too. Only a text adds a value; without one a session keeps its fingerprint.
+          ...(globalInstructions.trim() ? [["global-instructions", globalInstructions]] : []),
         ]),
       )
       .digest("hex");
@@ -1023,11 +1037,23 @@ export class ThreadLifecycle {
     const proxy = yield* this.#proxyFingerprint(configs);
     const environment = this.#agentEnvironment();
     const section = this.#sectionTeammates(agent.id);
+    // One reading for both fingerprints below, so a save between them cannot mix two texts.
+    const globalInstructions = this.#store.globalInstructions();
     const approvals = this.#toolApprovals(configs, own);
     const newline = stored.success.indexOf("\n");
     const storedFingerprint = newline < 0 ? stored.success : stored.success.slice(0, newline);
     const fingerprint = yield* threadStep(() =>
-      this.toolFingerprint(agent, configs, own, approvals, toolRuntimes, environment, section, proxy),
+      this.toolFingerprint(
+        agent,
+        configs,
+        own,
+        approvals,
+        toolRuntimes,
+        environment,
+        section,
+        proxy,
+        globalInstructions,
+      ),
     );
     if (storedFingerprint === fingerprint) return true;
     if (newline < 0) return false;
@@ -1039,7 +1065,17 @@ export class ThreadLifecycle {
     ).pipe(Effect.orElseSucceed(() => null));
     if (!sessionApprovals || approvalRevoked(sessionApprovals, approvals)) return false;
     const sessionFingerprint = yield* threadStep(() =>
-      this.toolFingerprint(agent, configs, own, sessionApprovals, toolRuntimes, environment, section, proxy),
+      this.toolFingerprint(
+        agent,
+        configs,
+        own,
+        sessionApprovals,
+        toolRuntimes,
+        environment,
+        section,
+        proxy,
+        globalInstructions,
+      ),
     );
     if (storedFingerprint !== sessionFingerprint) return false;
     yield* this.#writeToolManifest(sessionId, fingerprint, approvals);
@@ -1059,6 +1095,7 @@ export class ThreadLifecycle {
     homeSkills: readonly HomeSkill[] = [],
     sideThread = false,
     mcpServers: readonly McpServerConfig[],
+    globalInstructions: string,
   ): DynamicRecord {
     const memories = this.#memories.essentialFor(agent.id);
     const options = {
@@ -1074,6 +1111,7 @@ export class ThreadLifecycle {
       sectionTeammates: section,
       homeSkills,
       httpMcpServers: mcpServers.some((config) => config.transport === "http"),
+      globalInstructions,
     };
     const instructions = developerInstructions(
       agent,
@@ -1116,6 +1154,7 @@ export class ThreadLifecycle {
     owner: AgentSummary,
     client: AgentClient,
     externalThreadId: string,
+    globalInstructions = this.#store.globalInstructions(),
   ): Effect.fn.Return<DynamicRecord, ThreadOperationFailed> {
     const publicThreadId = this.#conversation.publicThreadId(owner.id, externalThreadId);
     const computerUseInOwnChat = this.#computerUseInOwnChat(owner, publicThreadId);
@@ -1142,6 +1181,7 @@ export class ThreadLifecycle {
         yield* this.#homeSkills(agent, client),
         this.#conversation.isTaskThread(publicThreadId),
         configs,
+        globalInstructions,
       ),
       ...(client.provider === "codex" ? {} : { dynamicTools: VISIBLE_DYNAMIC_TOOLS }),
       ...(yield* this.codexConfigEffect(
@@ -1162,7 +1202,8 @@ export class ThreadLifecycle {
     externalThreadId: string,
   ) {
     this.#conversation.bindThread(externalThreadId, agent.id);
-    const params = yield* this.threadParams(agent, client, externalThreadId);
+    const globalInstructions = this.#store.globalInstructions();
+    const params = yield* this.threadParams(agent, client, externalThreadId, globalInstructions);
     const resumed = yield* Effect.result(
       client.request("thread/resume", params, decodeRecordResponse).pipe(toThreadOperationFailed),
     );
@@ -1173,8 +1214,19 @@ export class ThreadLifecycle {
         .pipe(toThreadOperationFailed);
       yield* client.request("thread/resume", params, decodeRecordResponse).pipe(toThreadOperationFailed);
     }
-    this.#conversation.markThreadLoaded(externalThreadId, client);
+    this.#markLoadedWithGlobalInstructions(externalThreadId, client, globalInstructions);
   }).bind(this);
+
+  /**
+   * Marks a session that has just started or resumed as loaded. A save of the global instructions
+   * while the provider answered unloaded only the sessions that were loaded then, so this one would
+   * keep the old text. It is then unloaded at once, the way the save unloads a loaded session: the
+   * current turn runs on it, and the next turn loads it again with the new text.
+   */
+  #markLoadedWithGlobalInstructions(externalThreadId: string, client: AgentClient, used: string): void {
+    this.#conversation.markThreadLoaded(externalThreadId, client);
+    if (this.#store.globalInstructions() !== used) this.#conversation.unloadLoadedThread(externalThreadId);
+  }
 
   /**
    * Closes one provider session that the provider refuses, and keeps the public thread. The next

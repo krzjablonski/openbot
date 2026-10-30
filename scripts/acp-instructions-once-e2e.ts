@@ -2,12 +2,15 @@
 // instructions once and not with every prompt. The instructions are 20-30 k characters, so each
 // prompt that repeats them costs thousands of input tokens. The "context" agent reports its context
 // size as OpenCode does: the instructions must come again after a change, a compaction, a failed
-// prompt and a restart. The "silent" agent reports nothing: the instructions come every 10 prompts.
+// prompt and a restart. They start with the replace line when the context can still hold an earlier
+// block: after a change, a restart, or a failed prompt that followed a sent block. The "silent" agent
+// reports nothing: the instructions come every 10 prompts.
 // `bun run test:acp-instructions-once`. Writes .openbot-build/acp-instructions-once-e2e/report.json.
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { INSTRUCTIONS_REPLACE_LINE } from "../src/backend/agent/prompts";
 import type { AgentClient } from "../src/backend/agent-client";
 import { runCauseEffect } from "../src/backend/effect-boundary";
 import { requireProviderDriver } from "../src/backend/provider-drivers";
@@ -20,6 +23,7 @@ type Mode = (typeof MODES)[number];
 
 const INSTRUCTIONS = "You are a teammate in OpenBot. Memory: the user likes short answers.";
 const CHANGED = `${INSTRUCTIONS} Memory: the user works in Kraków.`;
+const CHANGED_AGAIN = `${CHANGED} Memory: the user drinks tea.`;
 
 interface Prompt {
   sessionId: string;
@@ -121,6 +125,14 @@ try {
     );
     await turn("nine", true);
     await turn("ten", false);
+    // A changed block goes in a prompt that fails. The context can still hold the earlier block, so
+    // the next prompt has the replace line.
+    await runCauseEffect(
+      client.request("thread/resume", { threadId: thread, ...threadParams(model, CHANGED_AGAIN) }, (v) => v),
+    );
+    await turn("fail-now changed", true);
+    await turn("eleven", true);
+    await turn("twelve", false);
     await runCauseEffect(client.stop());
 
     const prompts = await readJsonl<Prompt>(join(root, "context.jsonl"));
@@ -130,6 +142,31 @@ try {
       steps.find((step) => step.text === "fail-now")?.status,
       "failed",
       "context: the failing prompt fails.",
+    );
+    assert.equal(
+      steps.find((step) => step.text === "fail-now changed")?.status,
+      "failed",
+      "context: the failing prompt with the changed block fails.",
+    );
+    assert.deepEqual(
+      prompts
+        .filter((prompt) => prompt.instructions)
+        .map((prompt) => `${prompt.text}: ${prompt.instructionsText?.includes(INSTRUCTIONS_REPLACE_LINE) ?? false}`),
+      [
+        "one: false",
+        "three: true",
+        "five: false",
+        "six: false",
+        "seven: true",
+        "nine: true",
+        "fail-now changed: true",
+        "eleven: true",
+      ],
+      "context: the replace line comes only when the context can still hold an earlier block.",
+    );
+    assert.ok(
+      prompts.find((prompt) => prompt.text === "eleven")?.instructionsText?.includes(CHANGED_AGAIN),
+      "context: the prompt after the failed prompt has the changed block.",
     );
     assert.ok(prompts[0]?.instructionsText?.includes(INSTRUCTIONS), "context: the first prompt has the instructions.");
     assert.ok(

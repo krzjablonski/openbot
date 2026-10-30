@@ -6,11 +6,11 @@ import { agentProviderName, type KeyOnlyProviderId } from "@openbot/contracts/ag
 import { type DynamicRecord, isBoolean, isString } from "@openbot/contracts/runtime-values";
 import { sourceText } from "@openbot/i18n/source";
 import { redactText } from "@openbot/logging";
-import { Effect, Exit, Schema, Scope, Semaphore } from "effect";
+import { Cause, Effect, Exit, Schema, Scope, Semaphore } from "effect";
 import { secretElicitationField } from "./agent/prompts";
 import { type AgentClient, type DiagnosticOrigin, MissingPiSessionError, RequestTimeoutError } from "./agent-client";
 import { type AgentCliInfo, cliPathEnvironment, cliSpawnTarget } from "./cli";
-import { runCauseEffect } from "./effect-boundary";
+import { reportOriginalFailure, runCauseEffect } from "./effect-boundary";
 import { isMissingFileError } from "./file-errors";
 import { type DynamicToolNamespace, LocalMcpBridge, type LocalMcpSession } from "./local-mcp-bridge";
 import {
@@ -117,6 +117,11 @@ interface PiThread {
    * instructions and access. A thread that a history read opened after a restart has none of them.
    */
   configured: boolean;
+  /**
+   * The params of a `thread/resume` that came during a turn and could not replace the process. When
+   * the turn ends, the process closes, and the next turn opens one with these params.
+   */
+  reopenWith: { params: unknown } | null;
 }
 interface ClientEvents {
   notification: [AppServerNotification];
@@ -413,15 +418,29 @@ export class PiAgentClient extends EventEmitter<ClientEvents> implements AgentCl
     const requestedId = getString(params, "threadId");
     if (resume && requestedId) {
       const live = this.#threads.get(requestedId);
-      if (live && (live.configured || !configured)) return live;
+      // Pi reads `--append-system-prompt` only when it starts, so a live process keeps its instructions.
+      // Each change replaces it: the global text, the profile, a memory or another setting in them.
+      const sameInstructions =
+        live?.configured &&
+        getString(live.params, "developerInstructions") === getString(params, "developerInstructions");
+      if (live && (sameInstructions || !configured)) {
+        // A resume during this turn with other instructions is overruled: the live process has these.
+        if (sameInstructions) live.reopenWith = null;
+        return live;
+      }
       // The live thread has no OpenBot tools, and its next prompt would remove them from the session
-      // (#3343). An idle one is replaced by a thread with the session settings.
+      // (#3343), or it has old instructions. An idle one is replaced by a thread with the session
+      // settings. During a turn it stays, and closes when the turn ends: see `#finish`.
       if (live) {
         const replaced = yield* live.gate.withPermit(
           Effect.gen({ self: this }, function* () {
-            if (live.turn) return false;
+            if (live.turn) {
+              // Set while the turn runs, so `#finish` cannot miss it.
+              live.reopenWith = { params };
+              return false;
+            }
             this.#threads.delete(requestedId);
-            yield* this.#close(live);
+            if (!live.closed) yield* this.#close(live);
             return true;
           }),
         );
@@ -536,6 +555,7 @@ export class PiAgentClient extends EventEmitter<ClientEvents> implements AgentCl
         closed: false,
         gate: Semaphore.makeUnsafe(1),
         configured,
+        reopenWith: null,
       };
       yield* this.#configure(thread, params);
       this.#threads.set(id, thread);
@@ -810,7 +830,27 @@ export class PiAgentClient extends EventEmitter<ClientEvents> implements AgentCl
     }
     // Before the notice, so a session that closes when its turn ends is not busy.
     if (thread.turn === turn) thread.turn = null;
+    // A resume during the turn had new settings. The next turn opens a process with them, because
+    // the service does not resume a loaded session again. The old process closes after the notice:
+    // its stop can take seconds, and a failure or a defect there must not keep the turn running. The
+    // close cannot be interrupted: `stop` no longer sees this thread, and its scope close would skip
+    // the MCP session and the extension folder, which holds MCP secrets.
+    const reopen =
+      thread.turn === null && !thread.closed && this.#threads.get(thread.id) === thread ? thread.reopenWith : null;
+    if (reopen) {
+      this.#threads.delete(thread.id);
+      this.#released.set(thread.id, reopen.params);
+    }
     this.#notify("turn/completed", thread, { turn: { id: turn.id, status } });
+    if (reopen)
+      yield* this.#close(thread).pipe(
+        Effect.uninterruptible,
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : reportOriginalFailure(cause, (failure) => this.emit("diagnostic", this.#redact(String(failure)))),
+        ),
+      );
   });
 
   readonly #ui = Effect.fn("PiAgentClient.userInput")(function* (

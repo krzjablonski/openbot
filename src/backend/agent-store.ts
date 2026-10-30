@@ -197,6 +197,7 @@ export class AgentStore {
   readonly #creationQueue = Semaphore.makeUnsafe(1);
 
   readonly #agentDefaults: () => AgentDefaults;
+  readonly #globalInstructions: () => string;
 
   constructor(
     userDataPath: string,
@@ -205,6 +206,7 @@ export class AgentStore {
     agentDefaults: () => AgentDefaults = () => DEFAULT_AGENT_DEFAULTS,
     /** The folder of the agents, shared files and downloads. A local server has its own. */
     openbotRoot = join(homePath, "OpenBot"),
+    globalInstructions: () => string = () => "",
   ) {
     this.#statePath = join(userDataPath, LEGACY_AGENTS_STATE_FILE);
     this.#agentsRoot = join(openbotRoot, "Agents");
@@ -216,6 +218,7 @@ export class AgentStore {
     this.#automationRoot = automationRoot(userDataPath);
     this.#database = database;
     this.#agentDefaults = agentDefaults;
+    this.#globalInstructions = globalInstructions;
     this.#profileCreationRecovery = new ProfileCreationRecovery(
       join(userDataPath, "agent-profile-creations"),
       this.#agentsRoot,
@@ -225,6 +228,11 @@ export class AgentStore {
   /** The account defaults that an agent with no value of its own follows; see `AGENT_DEFAULT_KEYS`. */
   agentDefaults(): AgentDefaults {
     return this.#agentDefaults();
+  }
+
+  /** The text that this app's agents get in their instructions; empty means none. */
+  globalInstructions(): string {
+    return this.#globalInstructions();
   }
 
   get database(): OpenBotDatabase {

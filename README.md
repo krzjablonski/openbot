@@ -28,6 +28,7 @@ messaging in one desktop app.
 - A persistent embedded browser that agents can open, inspect, and control.
 - Optional Computer Use on macOS, Windows and Linux through the `cua-driver` binary in the release, which OpenBot starts as its own child process and gives to every provider.
 - Per-agent model, reasoning, profile, notification, browser, and panel state.
+- Global instructions in Settings > Agents: one text that this app's agents get. Local servers on this computer and joined servers do not get it.
 - Local data and privacy-safe diagnostics exports from the account menu.
 - Optional OpenBot accounts through one-time email codes. The account API runs on Cloudflare Workers and D1.
 

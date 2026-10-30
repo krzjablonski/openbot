@@ -27,6 +27,7 @@ import type { AppearanceService } from "../appearance-service";
 import type { ApprovalAutomation } from "../approval-automation-store";
 import type { BusyMessageModePreferenceStore } from "../busy-message-mode-preference-store";
 import type { ExternalLinkOpener, ExternalLinkPreferenceStore } from "../external-link-opener";
+import type { GlobalInstructionsPreferenceStore } from "../global-instructions-preference-store";
 import type { InterfaceSizeService } from "../interface-size-service";
 import type { LanguageService } from "../language-service";
 import type { LogoColorService } from "../logo-color-service";
@@ -50,6 +51,7 @@ import {
   parseChatWindowTarget,
   parseExternalDestination,
   parseExternalLinkPreference,
+  parseGlobalInstructions,
   parseRemoteNetworkRoutePreference,
   parseRemoteSessionReusePreference,
   parseSetup,
@@ -100,6 +102,7 @@ export interface AppIpcDependencies {
   approvalAutomation: ApprovalAutomation;
   busyMessageMode: BusyMessageModePreferenceStore;
   agentDefaults: AgentDefaultsPreferenceStore;
+  globalInstructions: GlobalInstructionsPreferenceStore;
   agentMemoryLimit: AgentMemoryLimitSetting;
   remoteSessionReuse: RemoteSessionReusePreferenceStore;
   remoteNetworkRoute: RemoteNetworkRoutePreferenceStore;
@@ -136,6 +139,7 @@ export function appIpcHandlers({
   approvalAutomation,
   busyMessageMode,
   agentDefaults,
+  globalInstructions,
   agentMemoryLimit,
   remoteSessionReuse,
   remoteNetworkRoute,
@@ -201,6 +205,13 @@ export function appIpcHandlers({
         const previous = agentDefaults.get();
         const saved = await runCauseEffect(agentDefaults.set(parsed));
         service.agentDefaultsChanged(previous);
+        return saved;
+      }),
+      getGlobalInstructions: handler(() => globalInstructions.get()),
+      // The agents load their sessions again before the next turn: see `AgentService.globalInstructionsChanged`.
+      setGlobalInstructions: payloadHandler(parseGlobalInstructions, async (parsed) => {
+        const saved = await runCauseEffect(globalInstructions.set(parsed));
+        service.globalInstructionsChanged();
         return saved;
       }),
       getAgentMemoryLimitPreference: handler(() => agentMemoryLimit.get()),

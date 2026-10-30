@@ -1,17 +1,31 @@
 // The agents of `acp-instructions-once-e2e.ts`. Each prompt logs whether its first block carries the
 // OpenBot instructions. `FAKE_MODE` picks one: "context" reports its context size after each prompt,
 // as OpenCode does; "silent" reports none. A prompt that says "compact-now" shrinks the context,
-// "compaction-update" reports a completed compaction, and "fail-now" fails.
+// "compaction-update" reports a completed compaction, and "fail-now" fails. While the file
+// `FAKE_HOLD_FILE` exists, a `session/new`, `session/load` or `session/resume` that the file names
+// writes that path with `.held` and gets its answer only when the file is gone.
 import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { type AcpHandler, logEntry, serveFakeAcpAgent } from "../acp-agent";
 
 const INSTRUCTIONS_TAG = "<openbot-developer-instructions>";
 const mode = process.env.FAKE_MODE;
 const contexts = new Map<string, number>();
 
+const hold = process.env.FAKE_HOLD_FILE;
+
 const session: AcpHandler = (request, peer) => {
-  if (request.method === "session/new") peer.reply(request, { sessionId: randomUUID() });
-  else peer.reply(request, {});
+  const reply = () => {
+    if (request.method === "session/new") peer.reply(request, { sessionId: randomUUID() });
+    else peer.reply(request, {});
+  };
+  if (!hold || !existsSync(hold) || !readFileSync(hold, "utf8").split(/\s+/).includes(request.method)) return reply();
+  writeFileSync(`${hold}.held`, `${request.method}\n`);
+  const timer = setInterval(() => {
+    if (existsSync(hold)) return;
+    clearInterval(timer);
+    reply();
+  }, 25);
 };
 
 serveFakeAcpAgent({

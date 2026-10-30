@@ -15,6 +15,7 @@ import type {
   DynamicIslandPresentation,
   ExternalDestination,
   ExternalLinkPreference,
+  GlobalInstructions,
   HostUpdateSettingsChange,
   IdleRestartTarget,
   InstallMarketplaceAgentInput,
@@ -77,6 +78,7 @@ import {
   isString,
 } from "@openbot/contracts/runtime-values";
 import { validateProfileName } from "@openbot/contracts/validation";
+import { sourceText } from "@openbot/i18n/source";
 import { parseAvatarImage } from "./avatar-inputs";
 import { isObject, optionalBoolean, requireString } from "./validation";
 
@@ -113,6 +115,13 @@ export function parseAgentDefaults(input: unknown): AgentDefaults {
     allowNewChat: input.allowNewChat,
     quickAcknowledgement: input.quickAcknowledgement,
   };
+}
+
+export function parseGlobalInstructions(input: unknown): GlobalInstructions {
+  if (!isDynamicRecord(input) || typeof input.text !== "string") throw new Error("Global instructions are required.");
+  if (input.text.length > INPUT_LIMITS.globalInstructions)
+    throw new Error(sourceText("error.app.globalInstructionsTooLong", { limit: INPUT_LIMITS.globalInstructions }));
+  return { text: input.text.trim() === "" ? "" : input.text };
 }
 
 export function parseAgentMemoryLimitPreference(input: unknown): AgentMemoryLimitPreference {

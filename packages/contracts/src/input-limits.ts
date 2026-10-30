@@ -20,6 +20,8 @@ export const INPUT_LIMITS = {
   serviceTier: 64,
   agentTitle: 120,
   agentDescription: 2_000,
+  // The one text that this app's agents get in their instructions.
+  globalInstructions: 2_000,
   // The smallest choice of the app setting `AGENT_MEMORY_LIMITS`.
   agentMemories: 64,
   agentSkills: 32,

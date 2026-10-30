@@ -34,7 +34,11 @@ conversation. Claude builds its SDK MCP server from the same visible definitions
 receive them through the local MCP bridge.
 
 `agent/developer-instructions.ts` puts stable rules first, profile and workspace settings next,
-and memories last. Detailed browser, administration, routine, hosting, data, and visual guidance
+and memories last. The global instructions block of the user comes after the rules and before the
+profile. It is there only when the text is not empty. The setting is local: it goes to this app's agents. Local servers on
+this computer and joined servers do not get it, because a local server is a child process with its
+own user data.
+Detailed browser, administration, routine, hosting, data, and visual guidance
 loads through `tool_search` or `tool_describe`. Essential secret handling and untrusted-content rules stay in the
 permanent instructions. Each rule has one place: the Vault, wait, and memory-selection details are in
 their tool guidance or descriptions, and the teammate reply format and the rule against

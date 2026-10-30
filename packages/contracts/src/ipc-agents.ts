@@ -62,6 +62,23 @@ export function isAgentDefaults(value: unknown): value is AgentDefaults {
   return isDynamicRecord(value) && AGENT_DEFAULT_KEYS.every((key) => isBoolean(value[key]));
 }
 
+/**
+ * The text that this app's agents get in their instructions. Empty means no text. `storedFileInvalid`
+ * is set only in a read, when the saved file was not valid: the agents get no text, and a save
+ * replaces the file. A save never stores it.
+ */
+export type GlobalInstructions = { text: string; storedFileInvalid?: true };
+
+export const DEFAULT_GLOBAL_INSTRUCTIONS: GlobalInstructions = { text: "" };
+
+export function isGlobalInstructions(value: unknown): value is GlobalInstructions {
+  return (
+    isDynamicRecord(value) &&
+    isBoundedString(value.text, INPUT_LIMITS.globalInstructions) &&
+    (value.storedFileInvalid === undefined || value.storedFileInvalid === true)
+  );
+}
+
 export function agentAutomationAllowed(
   agent: { allowAutomation?: boolean | undefined },
   defaults: AgentDefaults,

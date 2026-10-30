@@ -98,6 +98,11 @@ Channel history keeps its existing membership and task checks. Messaging history
 current link. The full conversation stays in local SQLite storage. No history text is sent to the
 account service or analytics by these tools.
 
+OpenBot sends the global instructions text from Settings > Agents to the provider of each of this
+app's agents, as part of the agent's instructions. Local servers on this computer and joined servers
+do not get the text. A person who can chat with an agent can make it
+repeat the text. Do not put secrets in it.
+
 ## Local scripts
 
 Local scripts is off by default for each agent. When enabled, scripts that run as the same OS user

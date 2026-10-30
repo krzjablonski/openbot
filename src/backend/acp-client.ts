@@ -37,7 +37,12 @@ import {
 import { AcpConnection, type AcpConnectionOptions } from "./acp-connection";
 import type { AcpFlavor } from "./acp-flavor";
 import { acpPlanSteps, PLAN_UPDATED_METHOD } from "./agent/plan-updates";
-import { elicitationOptions, elicitationValue, secretElicitationField } from "./agent/prompts";
+import {
+  elicitationOptions,
+  elicitationValue,
+  INSTRUCTIONS_REPLACE_LINE,
+  secretElicitationField,
+} from "./agent/prompts";
 import { type AgentProvider, type DiagnosticOrigin, ProviderTurnActiveError } from "./agent-client";
 import type { AgentCliInfo } from "./cli";
 import { runCauseEffect } from "./effect-boundary";
@@ -198,6 +203,12 @@ interface AcpThread {
    * carry them: a new or loaded session, a changed text, a compaction, or a failed prompt.
    */
   instructionsSent: string | null;
+  /**
+   * The session was opened from an existing one (`session/resume` or `session/load`), or a prompt failed
+   * after a block was sent, and its context can still hold a block from before. Cleared when a turn
+   * with the instructions ends or a compaction.
+   */
+  restoredContext: boolean;
   /** Tokens in the session's context at the last `usage_update`; null while the agent sends none. */
   contextUsed: number | null;
   /** Prompts since the instructions were sent, for an agent that reports no context size. */
@@ -779,6 +790,7 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
    */
   #compacted(thread: AcpThread): void {
     thread.instructionsSent = null;
+    thread.restoredContext = false;
     this.emit("notification", {
       method: "openbot/context-compaction",
       params: { threadId: thread.id, status: "completed" },
@@ -1499,6 +1511,7 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
               cwd,
               developerInstructions: getString(params, "developerInstructions") ?? "",
               instructionsSent: null,
+              restoredContext: resume && requestedThreadId !== null,
               contextUsed: null,
               promptsSinceInstructions: 0,
               configOptions,
@@ -1917,9 +1930,15 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
       (thread.instructionsSent !== thread.developerInstructions ||
         (thread.contextUsed === null && thread.promptsSinceInstructions > ACP_INSTRUCTIONS_REFRESH_PROMPTS))
     ) {
+      // A changed block is sent again, or a reopened session gets its first one. The context can still
+      // hold the earlier block.
+      const replaces =
+        thread.instructionsSent === null
+          ? thread.restoredContext
+          : thread.instructionsSent !== thread.developerInstructions;
       blocks.unshift({
         type: "text",
-        text: `<openbot-developer-instructions>\n${thread.developerInstructions}\n</openbot-developer-instructions>`,
+        text: `<openbot-developer-instructions>\n${replaces ? `${INSTRUCTIONS_REPLACE_LINE}\n` : ""}${thread.developerInstructions}\n</openbot-developer-instructions>`,
       });
       thread.instructionsSent = thread.developerInstructions;
       thread.promptsSinceInstructions = 1;
@@ -2712,8 +2731,13 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
   ) {
     if (thread.activeTurn !== turn || turn.completing) return;
     turn.completing = true;
-    // The agent may not have kept a prompt that failed.
-    if (status === "failed") thread.instructionsSent = null;
+    // The agent may not have kept a prompt that failed, but it can have kept a block from before.
+    if (status === "failed") {
+      if (thread.instructionsSent !== null) thread.restoredContext = true;
+      thread.instructionsSent = null;
+    }
+    // A reopened session that kept a block with the replace line needs the line no more.
+    else if (thread.instructionsSent !== null) thread.restoredContext = false;
     // The agent can still store the rest of a turn that did not complete. A replay does not show it.
     if (status !== "completed") thread.backgroundSkipUntil = Date.now() + ACP_STOPPED_OUTPUT_MS;
     // A prompt can have run tools. Never replay it. Drop the handle before publishing completion

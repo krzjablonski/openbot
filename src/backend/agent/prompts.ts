@@ -407,3 +407,10 @@ export function approvalPermissions(params: unknown): AgentApprovalPermissions {
     network: network?.enabled === true,
   };
 }
+
+/**
+ * The first line of instructions that a session gets again after they changed. The session keeps the
+ * earlier block in its context, and this line tells the model which block counts.
+ */
+export const INSTRUCTIONS_REPLACE_LINE =
+  "These instructions replace every earlier OpenBot instructions block in this session.";

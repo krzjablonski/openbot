@@ -66,6 +66,17 @@ export const messages = {
   "settings.busyMessage.title": "Kieruj agentami podczas pracy",
   "settings.busyMessage.description":
     "Nowe wiadomości dołączają do bieżącej pracy agenta, a nie do kolejki. Działa z ChatGPT i Claude.",
+  "settings.globalInstructions.title": "Instrukcje globalne",
+  "settings.globalInstructions.description":
+    "Agenci tej aplikacji dostają ten tekst w swoich instrukcjach. Agenci na serwerach go nie dostają. Agenci używają nowego tekstu od następnej wiadomości.",
+  "settings.globalInstructions.placeholder": "Na przykład: Odpowiadaj krótkimi zdaniami.",
+  "settings.globalInstructions.save": "Zapisz",
+  "settings.globalInstructions.saved": "Zapisano instrukcje globalne",
+  "settings.globalInstructions.saveFailed": "Nie udało się zapisać instrukcji globalnych",
+  "settings.globalInstructions.loadFailed":
+    "Nie udało się odczytać instrukcji globalnych. Otwórz tę kartę ponownie, aby spróbować jeszcze raz.",
+  "settings.globalInstructions.storedInvalid":
+    "Nie udało się odczytać zapisanych instrukcji globalnych. Agenci nie dostają instrukcji globalnych. Gdy zapiszesz, nowy tekst je zastąpi.",
   "settings.keepRemoteSessions.title": "Szybkie połączenie z serwerami",
   "settings.keepRemoteSessions.description":
     "Zachowuj połączenie z dołączonymi serwerami między uruchomieniami. OpenBot startuje około sekundy szybciej. Gdy zamkniesz OpenBot, usługa OpenBot nie zamyka połączenia.",

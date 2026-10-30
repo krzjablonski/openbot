@@ -467,6 +467,8 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
   readonly #routineFlowTools: (() => RoutineFlowTools) | undefined;
   readonly #developmentDefaults: boolean;
   readonly #busyMessageMode: () => BusyMessageMode;
+  /** The global instructions that the loaded sessions were given, so a save of the same text reloads none. */
+  #globalInstructions: string;
   /** The last turn of each agent's chat that the user stopped. One per agent, so it needs no clean-up. */
   readonly #stoppedTurns = new Map<string, string>();
 
@@ -505,6 +507,7 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
     this.#localSkillTools = localSkillTools;
     this.#routineFlowTools = routineFlowTools;
     this.#store = store;
+    this.#globalInstructions = store.globalInstructions();
     // First of the sub-objects, because `#emitError` reads it to redact and every one of them is
     // given that callback.
     this.#mcp = new McpGateway({
@@ -1586,6 +1589,18 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
       if (standingProfileChanged(agent, agent, defaults, previous)) this.#conversation.unloadAgentThreads(agent.id);
     }
     this.#emit({ type: "agents-changed", agents: this.listAgents() });
+  }
+
+  /**
+   * After a save of the global instructions: every agent loads its sessions again before its next
+   * turn, so its instructions carry the new text. The same text reloads nothing. No agent summary
+   * holds the text, so `agents-changed` has nothing new to say.
+   */
+  globalInstructionsChanged(): void {
+    const text = this.#store.globalInstructions();
+    if (text === this.#globalInstructions) return;
+    this.#globalInstructions = text;
+    for (const agent of this.#store.list()) this.#conversation.unloadAgentThreads(agent.id);
   }
 
   /**

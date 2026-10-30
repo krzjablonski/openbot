@@ -10,5 +10,6 @@ export const messages = defineMessages("error.app", {
   "error.app.secretStorageUnavailable": "System secret storage is unavailable.",
   "error.app.remoteIdentityUnavailable": "The remote host identity is unavailable.",
   "error.app.iceServersMissing": "Remote Signal has not supplied ICE servers yet.",
+  "error.app.globalInstructionsTooLong": "Global instructions can have up to {limit} characters.",
   "error.app.finishLocalTest": "Finish the local test before switching displays.",
 });

@@ -6,6 +6,8 @@ import type { OpenBotDesktopApi } from "@openbot/contracts/ipc";
  */
 export interface SettingsPort {
   getAgentDefaults: OpenBotDesktopApi["getAgentDefaults"];
+  getGlobalInstructions: OpenBotDesktopApi["getGlobalInstructions"];
+  setGlobalInstructions: OpenBotDesktopApi["setGlobalInstructions"];
   getAgentMemoryLimitPreference: OpenBotDesktopApi["getAgentMemoryLimitPreference"];
   getAnalyticsPreference: OpenBotDesktopApi["getAnalyticsPreference"];
   getAppBehaviorPreference: OpenBotDesktopApi["getAppBehaviorPreference"];

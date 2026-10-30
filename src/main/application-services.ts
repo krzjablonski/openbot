@@ -191,6 +191,10 @@ import {
 import { githubAppConfig } from "./github-connector-config";
 import { GitHubConnectorService } from "./github-connector-service";
 import { GitHubConnectorStore } from "./github-connector-store";
+import {
+  createGlobalInstructionsPreferenceStore,
+  type GlobalInstructionsPreferenceStore,
+} from "./global-instructions-preference-store";
 import { HermesImportService } from "./hermes-import-service";
 import { HostEventsRuntime } from "./host-events-runtime";
 import { agentWebhookRoutineWriter, HostEventsService } from "./host-events-service";
@@ -350,6 +354,7 @@ const PUSH_NOTIFICATION_FILE = "openbot-push-notifications-v1.json";
 const BUSY_MESSAGE_MODE_PREFERENCE_FILE = "openbot-busy-message-mode-v1.json";
 const PROVIDER_CLI_APP_VERSION_FILE = "openbot-provider-cli-app-version-v1.json";
 const AGENT_DEFAULTS_PREFERENCE_FILE = "openbot-agent-defaults-v1.json";
+const GLOBAL_INSTRUCTIONS_PREFERENCE_FILE = "openbot-global-instructions-v1.json";
 const AGENT_MEMORY_LIMIT_PREFERENCE_FILE = "openbot-agent-memory-limit-v1.json";
 const MEMORY_REVIEW_PREFERENCE_FILE = "openbot-memory-review-v1.json";
 const SERVER_TIMEZONE_PREFERENCE_FILE = "openbot-server-timezone-v1.json";
@@ -563,6 +568,7 @@ export interface ApplicationServices {
   notificationPreference: NotificationPreferenceStore;
   busyMessageMode: BusyMessageModePreferenceStore;
   agentDefaults: AgentDefaultsPreferenceStore;
+  globalInstructions: GlobalInstructionsPreferenceStore;
   agentMemoryLimit: AgentMemoryLimitSetting;
   memoryReview: MemoryReviewPreferenceStore;
   agentAccess: AgentAccessStore;
@@ -1001,12 +1007,17 @@ export async function createApplicationServices({
     join(app.getPath("userData"), AGENT_DEFAULTS_PREFERENCE_FILE),
   );
   await runCauseEffect(agentDefaults.load());
+  const globalInstructions = createGlobalInstructionsPreferenceStore(
+    join(app.getPath("userData"), GLOBAL_INSTRUCTIONS_PREFERENCE_FILE),
+  );
+  await runCauseEffect(globalInstructions.load());
   const store = new AgentStore(
     app.getPath("userData"),
     homedir(),
     new OpenBotDatabase(app.getPath("userData")),
     () => agentDefaults.get(),
     localServerChild?.agentRoot,
+    () => globalInstructions.get().text,
   );
   // Phase marks for `dev:bench`, so a slow start shows which group of awaits it waited on. They
   // change nothing.
@@ -3166,6 +3177,7 @@ export async function createApplicationServices({
     notificationPreference,
     busyMessageMode,
     agentDefaults,
+    globalInstructions,
     agentMemoryLimit: agentMemoryLimitSetting,
     memoryReview,
     agentAccess,

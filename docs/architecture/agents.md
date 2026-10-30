@@ -461,6 +461,14 @@ them: on the first turn of a new or reopened session, after a change, after a co
 turn, and, for an ACP agent that reports no context size, every 10 turns. There is no model-specific
 verbosity setting or response filter. Delivery is tested, but compliance depends on the provider,
 model, and existing conversation context; Grok's input block is not a dedicated system message.
+A change of the global instructions unloads the sessions of this app's agents, so the next turn uses
+the new text. Local servers on this computer and joined servers do not get the text: a local server
+is a child process with its own user data. Codex starts a new session, because the text is in its
+tool fingerprint. Pi and the key-only providers start a new process on the same session file when
+the session is idle, because Pi reads its instructions only when it starts. A resume during a turn
+marks the process, and it closes when the turn ends, so the next turn starts a new process. Pi and
+the key-only providers do this for each change of the instructions, so a changed profile or memory
+also gets to them from their next message.
 Restarting the app reapplies the current policy without deleting conversation history. The policy
 does not hide mailbox records, tool activity, approvals, or failures in desktop or mobile clients.
 

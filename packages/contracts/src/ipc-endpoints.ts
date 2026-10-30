@@ -130,6 +130,7 @@ import type {
   ClientAgentSummary,
   CreateAgentInput,
   DuplicateAgentResult,
+  GlobalInstructions,
   SetAgentAvatarInput,
   UpdateAgentInput,
 } from "./ipc-agents";
@@ -643,6 +644,8 @@ export const IPC_ENDPOINTS = {
     ),
     getAgentDefaults: request<undefined, AgentDefaults>()("app:get-agent-defaults"),
     setAgentDefaults: request<AgentDefaults, AgentDefaults>()("app:set-agent-defaults"),
+    getGlobalInstructions: request<undefined, GlobalInstructions>()("app:get-global-instructions"),
+    setGlobalInstructions: request<GlobalInstructions, GlobalInstructions>()("app:set-global-instructions"),
     getAgentMemoryLimitPreference: request<undefined, AgentMemoryLimitPreference>()("app:get-agent-memory-limit"),
     // Server settings set the limit of this computer (`hostAdmin.setAgentMemoryLimit`), here or from a
     // joined admin, so main tells the window.

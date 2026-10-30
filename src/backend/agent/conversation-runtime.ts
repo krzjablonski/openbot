@@ -824,11 +824,16 @@ export class ConversationRuntime {
    */
   unloadAgentThreads(agentId: string): void {
     for (const [externalThreadId, owner] of this.#threadToAgent) {
-      const client = owner === agentId ? this.#loadedThreads.get(externalThreadId) : undefined;
-      if (!client) continue;
-      this.#loadedThreads.delete(externalThreadId);
-      this.#unloadedThreads.set(externalThreadId, client);
+      if (owner === agentId) this.unloadLoadedThread(externalThreadId);
     }
+  }
+
+  /** Unloads one loaded session as `unloadAgentThreads` does: its client keeps it open for the next turn. */
+  unloadLoadedThread(externalThreadId: string): void {
+    const client = this.#loadedThreads.get(externalThreadId);
+    if (!client) return;
+    this.#loadedThreads.delete(externalThreadId);
+    this.#unloadedThreads.set(externalThreadId, client);
   }
 
   /**

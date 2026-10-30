@@ -1,12 +1,14 @@
 // Drives MuseAgentClient and the installed SDK over a fake Muse server to check that a session gets
 // the OpenBot instructions once and not with every turn. They must come again after a change, a
-// compaction, a failed turn and a restart.
+// compaction, a failed turn and a restart. They start with the replace line when the context can still
+// hold an earlier text: after a change, a restart, or a failed turn that followed a sent text.
 // `bun run test:muse-instructions-once`. Writes .openbot-build/muse-instructions-once-e2e/report.json.
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { EXPECTED_SCHEMA_FINGERPRINT } from "@muse-code/sdk";
+import { INSTRUCTIONS_REPLACE_LINE } from "../src/backend/agent/prompts";
 import type { AgentClient } from "../src/backend/agent-client";
 import { runCauseEffect } from "../src/backend/effect-boundary";
 import { MuseAgentClient } from "../src/backend/muse-client";
@@ -15,6 +17,7 @@ import { readJsonl, runTurn, startThread, stopClients } from "./provider-fakes/h
 const OUT = resolve(import.meta.dirname, "../.openbot-build/muse-instructions-once-e2e");
 const INSTRUCTIONS = "You are a teammate in OpenBot. Memory: the user likes short answers.";
 const CHANGED = `${INSTRUCTIONS} Memory: the user works in Kraków.`;
+const CHANGED_AGAIN = `${CHANGED} Memory: the user drinks tea.`;
 
 // The fake answers only the MSP requests that this test sends. A turn that says "compact-now"
 // reports a completed compaction item, and one that says "fail-now" ends as failed.
@@ -127,22 +130,36 @@ try {
   await turn("two", null);
   // A memory change reaches the held session through a resume, as `ThreadLifecycle` does.
   await runCauseEffect(client.request("thread/resume", { threadId: thread, ...params(CHANGED) }, (v) => v));
-  await turn("three", CHANGED);
+  // The session still holds the first text, so the changed text starts with the replace line.
+  await turn("three", `${INSTRUCTIONS_REPLACE_LINE}\n${CHANGED}`);
   await turn("compact-now", null);
   await turn("four", CHANGED);
   await turn("fail-now", null);
-  await turn("five", CHANGED);
+  // The session can still hold the text from "four", so the text starts with the replace line.
+  await turn("five", `${INSTRUCTIONS_REPLACE_LINE}\n${CHANGED}`);
   await turn("six", null);
-  // A new process opens the saved session, which may have lost its context.
+  // A new process opens the saved session. Its restored context can hold the earlier text, so the
+  // first text starts with the replace line.
   await runCauseEffect(client.stop());
   client = open();
   await runCauseEffect(client.request("thread/resume", { threadId: thread, ...params(CHANGED) }, (v) => v));
-  await turn("seven", CHANGED);
+  await turn("seven", `${INSTRUCTIONS_REPLACE_LINE}\n${CHANGED}`);
   await turn("eight", null);
+  // A changed text goes in a turn that fails. The context can still hold the earlier text, so the next
+  // turn has the replace line.
+  await runCauseEffect(client.request("thread/resume", { threadId: thread, ...params(CHANGED_AGAIN) }, (v) => v));
+  await turn("fail-now changed", `${INSTRUCTIONS_REPLACE_LINE}\n${CHANGED_AGAIN}`);
+  await turn("nine", `${INSTRUCTIONS_REPLACE_LINE}\n${CHANGED_AGAIN}`);
+  await turn("ten", null);
   await runCauseEffect(client.stop());
 
   report.prompts = await readJsonl<{ texts: string[] }>(log);
   assert.equal(report.steps.find((step) => step.text === "fail-now")?.status, "failed", "The failing turn fails.");
+  assert.equal(
+    report.steps.find((step) => step.text === "fail-now changed")?.status,
+    "failed",
+    "The failing turn with the changed text fails.",
+  );
   assert.deepEqual(
     report.prompts.map((prompt) => prompt.texts),
     report.steps.map((step) => (step.instructions ? [step.instructions, step.text] : [step.text])),

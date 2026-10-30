@@ -1,3 +1,4 @@
+import { INPUT_LIMITS } from "@openbot/contracts/input-limits";
 import type { AgentDefaultKey, AgentDefaults, ClientAgentSummary } from "@openbot/contracts/ipc";
 import type { AppTextKey } from "@openbot/i18n";
 import {
@@ -10,6 +11,7 @@ import {
   ChevronDown,
   ChevronRight,
   DropdownMenu,
+  Field,
   Item,
   ItemActions,
   ItemContent,
@@ -25,10 +27,12 @@ import {
   SettingsSection,
   SwitchField,
   Text,
+  Textarea,
 } from "@openbot/ui";
 import { For, Show } from "solid-js";
 import { useText } from "../../text";
 import { AgentAvatar } from "../agents/AgentAvatar";
+import { InstructionsLimit, instructionsTooLong } from "../agents/InstructionsLimit";
 
 /** A setting of the Agents tab: the three account defaults, and "Steer agents while they work". */
 export type AgentDefaultSetting = AgentDefaultKey | "busyMessageMode";
@@ -127,6 +131,20 @@ export interface SettingsAgentsTabProps {
   steer: boolean;
   /** The open setting, or null for the list of settings. */
   setting: AgentDefaultSetting | null;
+  /** The text of the global instructions editor, saved or not. */
+  globalInstructions: string;
+  /** The saved text, so Save is off until the editor differs from it. */
+  savedGlobalInstructions: string;
+  /** True after the saved text was read. Until then the editor and Save are off. */
+  globalInstructionsLoaded: boolean;
+  /** True when the last read of the saved text failed. */
+  globalInstructionsLoadFailed: boolean;
+  /** True when the saved file was not valid: the agents get no text, and a save replaces the file. */
+  globalInstructionsStoredInvalid: boolean;
+  /** True while a save runs. */
+  globalInstructionsSaving: boolean;
+  onGlobalInstructionsChange: (text: string) => void;
+  onGlobalInstructionsSave: () => void;
   /** The dialog element that the menus portal into. */
   menuMount: HTMLElement | undefined;
   onOpen: (setting: AgentDefaultSetting) => void;
@@ -170,45 +188,97 @@ export function SettingsAgentsTab(props: SettingsAgentsTabProps) {
     </Show>
   );
 
-  const list = () => (
-    <SettingsSection title={t("settings.agentDefaults.title")} description={t("settings.agentDefaults.description")}>
-      <ItemGroup class="settings-modal-card">
-        <For each={AGENT_DEFAULT_SETTINGS}>
-          {(setting) => {
-            const on = () => props.agents.filter((agent) => isOn(agent, setting.key));
-            return (
-              <Item data-settings-row={setting.title} class="settings-modal-row integrations-hub-row">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  class="integrations-hub-hitarea"
-                  aria-label={t("settings.agentDefaults.open", { name: t(setting.title) })}
-                  onClick={() => props.onOpen(setting.key)}
-                />
-                <ItemContent>
-                  <ItemTitle>{t(setting.title)}</ItemTitle>
-                  <ItemDescription>
-                    {t("settings.agentDefaults.value", { value: valueLabel(setting.key, defaultOn(setting.key)) })}
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions class="integrations-hub-actions">
-                  <AgentFaces agents={on()} />
-                  <Show when={props.agents.length > 0}>
-                    <Text variant="label-sm" tone="muted" class="server-roles-member-count">
-                      {t("settings.agentDefaults.count", {
-                        on: String(on().length),
-                        total: String(props.agents.length),
-                      })}
-                    </Text>
-                  </Show>
-                  <ChevronRight class="integrations-hub-chevron" aria-hidden="true" />
-                </ItemActions>
-              </Item>
-            );
-          }}
-        </For>
-      </ItemGroup>
+  const globalInstructions = () => (
+    <SettingsSection
+      data-settings-row="settings.globalInstructions.title"
+      title={t("settings.globalInstructions.title")}
+      description={t("settings.globalInstructions.description")}
+    >
+      <Field label={t("settings.globalInstructions.title")}>
+        <Textarea
+          rows={5}
+          value={props.globalInstructions}
+          disabled={!props.globalInstructionsLoaded}
+          invalid={instructionsTooLong(props.globalInstructions, INPUT_LIMITS.globalInstructions)}
+          placeholder={t("settings.globalInstructions.placeholder")}
+          onValueChange={props.onGlobalInstructionsChange}
+        />
+        <InstructionsLimit text={props.globalInstructions} limit={INPUT_LIMITS.globalInstructions} />
+        <Show when={props.globalInstructionsLoadFailed}>
+          <Alert tone="danger" role="alert" report={{ operation: "settings", source: "system", cause_code: "unknown" }}>
+            <AlertContent>
+              <AlertDescription>{t("settings.globalInstructions.loadFailed")}</AlertDescription>
+            </AlertContent>
+          </Alert>
+        </Show>
+        <Show when={props.globalInstructionsStoredInvalid && !props.globalInstructionsLoadFailed}>
+          <Alert tone="danger" role="alert" report={{ operation: "settings", source: "system", cause_code: "unknown" }}>
+            <AlertContent>
+              <AlertDescription>{t("settings.globalInstructions.storedInvalid")}</AlertDescription>
+            </AlertContent>
+          </Alert>
+        </Show>
+      </Field>
+      <div>
+        <Button
+          type="button"
+          size="sm"
+          disabled={
+            !props.globalInstructionsLoaded ||
+            props.globalInstructionsSaving ||
+            (props.globalInstructions === props.savedGlobalInstructions && !props.globalInstructionsStoredInvalid) ||
+            instructionsTooLong(props.globalInstructions, INPUT_LIMITS.globalInstructions)
+          }
+          onClick={() => props.onGlobalInstructionsSave()}
+        >
+          {t("settings.globalInstructions.save")}
+        </Button>
+      </div>
     </SettingsSection>
+  );
+
+  const list = () => (
+    <>
+      <SettingsSection title={t("settings.agentDefaults.title")} description={t("settings.agentDefaults.description")}>
+        <ItemGroup class="settings-modal-card">
+          <For each={AGENT_DEFAULT_SETTINGS}>
+            {(setting) => {
+              const on = () => props.agents.filter((agent) => isOn(agent, setting.key));
+              return (
+                <Item data-settings-row={setting.title} class="settings-modal-row integrations-hub-row">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    class="integrations-hub-hitarea"
+                    aria-label={t("settings.agentDefaults.open", { name: t(setting.title) })}
+                    onClick={() => props.onOpen(setting.key)}
+                  />
+                  <ItemContent>
+                    <ItemTitle>{t(setting.title)}</ItemTitle>
+                    <ItemDescription>
+                      {t("settings.agentDefaults.value", { value: valueLabel(setting.key, defaultOn(setting.key)) })}
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions class="integrations-hub-actions">
+                    <AgentFaces agents={on()} />
+                    <Show when={props.agents.length > 0}>
+                      <Text variant="label-sm" tone="muted" class="server-roles-member-count">
+                        {t("settings.agentDefaults.count", {
+                          on: String(on().length),
+                          total: String(props.agents.length),
+                        })}
+                      </Text>
+                    </Show>
+                    <ChevronRight class="integrations-hub-chevron" aria-hidden="true" />
+                  </ItemActions>
+                </Item>
+              );
+            }}
+          </For>
+        </ItemGroup>
+      </SettingsSection>
+      {globalInstructions()}
+    </>
   );
 
   const settingPage = (setting: AgentDefaultSetting) => {

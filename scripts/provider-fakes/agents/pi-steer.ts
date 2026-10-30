@@ -3,13 +3,15 @@
 // it settles. The answer has the text of every steer in the queue. A steer whose text starts with
 // `refuse` is refused, as Pi refuses an extension command, and the run goes on. A steer whose text
 // starts with `hold` stays in the queue, as during a long tool call. A steer whose text starts with
-// `slow` is queued but gets no answer. Each request is logged to `FAKE_LOG`.
+// `slow` is queued but gets no answer. A prompt whose text has `QUICK` settles at once. Each request is
+// logged to `FAKE_LOG`, and so is the start of each process with its `--append-system-prompt` value.
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { isDynamicRecord, type DynamicRecord as RpcRecord } from "@openbot/contracts/runtime-values";
 
-const sessionFile = join(process.env.FAKE_DIR ?? process.cwd(), `pi-${process.pid}.jsonl`);
+/** The session file. `switch_session` loads another one, as Pi does. */
+let sessionFile = join(process.env.FAKE_DIR ?? process.cwd(), `pi-${process.pid}.jsonl`);
 let streaming = false;
 /** The steers that Pi has queued and not read. */
 let queue: string[] = [];
@@ -40,15 +42,26 @@ function settle(text: string): void {
   write({ type: "agent_settled" });
 }
 
+const appendAt = process.argv.indexOf("--append-system-prompt");
+log({
+  event: "spawn",
+  pid: process.pid,
+  appendSystemPrompt: appendAt < 0 ? null : (process.argv[appendAt + 1] ?? null),
+});
+
 const handlers: Record<string, (command: RpcRecord) => void> = {
   get_state: (command) => answer(command, { sessionFile, isStreaming: streaming, isCompacting: false }),
-  switch_session: (command) => answer(command, { cancelled: false }),
+  switch_session: (command) => {
+    sessionFile = String(command.sessionPath);
+    answer(command, { cancelled: false });
+  },
   get_session_stats: (command) => refuse(command, "No stats."),
   prompt: (command) => {
     log({ event: "prompt", text: String(command.message), streamingBehavior: String(command.streamingBehavior) });
     if (streaming) return refuse(command, "Agent is already processing.");
     streaming = true;
     answer(command, { disposition: "started" });
+    if (String(command.message).includes("QUICK")) setTimeout(() => settle("quick answer"), 10);
   },
   steer: (command) => {
     const text = String(command.message);

@@ -1,4 +1,5 @@
 import { AGENT_MEMORY_CONTEXT_BUDGET_BYTES, essentialMemoryBytes } from "@openbot/contracts/agent-memory-context";
+import { INPUT_LIMITS } from "@openbot/contracts/input-limits";
 import type {
   AcpRegistryEntry,
   AgentSessionSettings,
@@ -72,6 +73,7 @@ import {
   DEFAULT_BUSY_MESSAGE_MODE,
   DEFAULT_DYNAMIC_ISLAND_PREFERENCE,
   DEFAULT_EXTERNAL_LINK_PREFERENCE,
+  DEFAULT_GLOBAL_INSTRUCTIONS,
   DEFAULT_MACHINE_ALERT_SETTINGS,
   DEFAULT_MEMORY_REVIEW_INTERVAL,
   DEFAULT_PROMPT_CACHE_TTL,
@@ -91,12 +93,14 @@ import {
   type ExternalLinkPreference,
   type FilePreview,
   folderInside,
+  type GlobalInstructions,
   type HostedSiteSummary,
   type HostStatus,
   hostAgentMemoryLimit,
   hostMemoryReview,
   isAgentMemoryLimit,
   isAgentSummary,
+  isGlobalInstructions,
   isMemoryReviewInterval,
   isPromptCacheTtl,
   isReleasedRoutineSchedule,
@@ -415,6 +419,7 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
   let approvalAutomation = clone<ApprovalAutomationPreference>(DEFAULT_APPROVAL_AUTOMATION_PREFERENCE);
   let busyMessageMode: BusyMessageModePreference = { mode: DEFAULT_BUSY_MESSAGE_MODE };
   let agentDefaults: AgentDefaults = { ...DEFAULT_AGENT_DEFAULTS };
+  let globalInstructions: GlobalInstructions = { ...DEFAULT_GLOBAL_INSTRUCTIONS };
   let agentMemoryLimit: AgentMemoryLimitPreference = { limit: DEFAULT_AGENT_MEMORY_LIMIT };
   let memoryReview: MemoryReviewPreference = { interval: DEFAULT_MEMORY_REVIEW_INTERVAL };
   // The disk level is below the preview disk use (82%), so Storage shows a passed level.
@@ -1082,6 +1087,14 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
       agentDefaults = { ...next };
       emitAgentEvent({ type: "agents-changed", agents });
       return clone(agentDefaults);
+    },
+    getGlobalInstructions: async () => clone(globalInstructions),
+    setGlobalInstructions: async (next) => {
+      // The rule of the main process: over the limit is refused, and whitespace only is saved as empty.
+      if (!isGlobalInstructions(next))
+        throw new Error(sourceText("error.app.globalInstructionsTooLong", { limit: INPUT_LIMITS.globalInstructions }));
+      globalInstructions = { text: next.text.trim() === "" ? "" : next.text };
+      return clone(globalInstructions);
     },
     getAgentMemoryLimitPreference: async () => clone(agentMemoryLimit),
     onAgentMemoryLimitPreference: (listener) => {

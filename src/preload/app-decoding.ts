@@ -55,6 +55,7 @@ import {
   type ExternalLinkPreference,
   type GitHubConnectorRepositories,
   type GitHubConnectorStatus,
+  type GlobalInstructions,
   type HostedSiteList,
   type HostedSiteSummary,
   IDLE_RESTART_TARGETS,
@@ -77,6 +78,7 @@ import {
   isDetectedAcpAgent,
   isDetectedModelServer,
   isDiscoverModelsResult,
+  isGlobalInstructions,
   isProviderDetectionSettings,
   isRemoteDesktopSetupStatus,
   isRemoteDesktopTestStatus,
@@ -175,6 +177,14 @@ export function decodeAgentDefaults(value: unknown): AgentDefaults {
   const decoded = { ...DEFAULT_AGENT_DEFAULTS };
   for (const key of AGENT_DEFAULT_KEYS) decoded[key] = requiredBoolean(defaults, key);
   return decoded;
+}
+
+export function decodeGlobalInstructions(value: unknown): GlobalInstructions {
+  const instructions = decodeRecord(value, "global instructions");
+  if (!isGlobalInstructions(instructions)) throw new Error("Invalid global instructions.");
+  return instructions.storedFileInvalid
+    ? { text: instructions.text, storedFileInvalid: true }
+    : { text: instructions.text };
 }
 
 export function decodeAgentMemoryLimitPreference(value: unknown): AgentMemoryLimitPreference {

@@ -87,6 +87,16 @@ export const messages = defineMessages("settings", {
   "settings.agentDefaults.setAllLabel": "Set {setting} for all agents",
   "settings.agentDefaults.agentLabel": "{setting} for {agent}",
   "settings.agentDefaults.loadFailed": "The agents could not be read.",
+  "settings.globalInstructions.title": "Global instructions",
+  "settings.globalInstructions.description":
+    "This app's agents get this text in their instructions. Agents on servers do not get it. Agents use new text from their next message.",
+  "settings.globalInstructions.placeholder": "For example: Answer in short sentences.",
+  "settings.globalInstructions.save": "Save",
+  "settings.globalInstructions.saved": "Global instructions saved",
+  "settings.globalInstructions.saveFailed": "Could not save the global instructions",
+  "settings.globalInstructions.loadFailed": "Could not read the global instructions. Open this tab again to retry.",
+  "settings.globalInstructions.storedInvalid":
+    "Could not read the saved global instructions. Agents get no global instructions. When you save, the new text replaces them.",
   "settings.keepRemoteSessions.title": "Fast connection to servers",
   "settings.keepRemoteSessions.description":
     "Keep the connection to your joined servers between launches. OpenBot starts about a second faster. When you quit OpenBot, the OpenBot service does not close the connection.",

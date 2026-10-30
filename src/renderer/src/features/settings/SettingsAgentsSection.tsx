@@ -17,6 +17,16 @@ interface AgentsSectionState {
   agents: AgentDefaultsAgent[];
   loadFailed: boolean;
   setting: AgentDefaultSetting | null;
+  /** The editor text of the global instructions, and the text that is saved. */
+  globalInstructions: string;
+  savedGlobalInstructions: string;
+  /** True after a read of the saved text worked. Until then the editor is off. */
+  globalInstructionsLoaded: boolean;
+  /** True when the last read of the saved text failed. */
+  globalInstructionsLoadFailed: boolean;
+  /** True when the last read found a saved file that was not valid. A save replaces the file. */
+  globalInstructionsStoredInvalid: boolean;
+  globalInstructionsSaving: boolean;
 }
 
 export interface SettingsAgentsSection {
@@ -42,6 +52,14 @@ function showAgentSaveFailure(error: unknown): void {
   });
 }
 
+function showGlobalInstructionsSaveFailure(error: unknown): void {
+  const { t, errorMessage } = currentText();
+  actionToast.error(errorMessage(error, t("settings.globalInstructions.saveFailed")), {
+    id: "settings-global-instructions-save-failed",
+    report: { operation: "settings", source: "action", cause_code: "unknown" },
+  });
+}
+
 /**
  * Settings › Agents: the defaults of the agents on this computer, and each agent's own value. The
  * tab reads the local agents each time it shows, whichever server is open.
@@ -52,9 +70,21 @@ export function createSettingsAgentsSection(options: {
   onValueChange: (value: GeneralSettingsValue) => void;
 }): SettingsAgentsSection {
   const { t } = useText();
-  const [state, setState] = createStore<AgentsSectionState>({ agents: [], loadFailed: false, setting: null });
+  const [state, setState] = createStore<AgentsSectionState>({
+    agents: [],
+    loadFailed: false,
+    setting: null,
+    globalInstructions: "",
+    savedGlobalInstructions: "",
+    globalInstructionsLoaded: false,
+    globalInstructionsLoadFailed: false,
+    globalInstructionsStoredInvalid: false,
+    globalInstructionsSaving: false,
+  });
   /** Bumped for each read, so an answer of an earlier read is dropped. */
   let generation = 0;
+  /** Bumped for each read and each save of the global instructions, so a read that started before them is dropped. */
+  let globalInstructionsGeneration = 0;
 
   function applyAgent(agent: ClientAgentSummary): void {
     setState((draft) => {
@@ -82,6 +112,62 @@ export function createSettingsAgentsSection(options: {
       });
   }
 
+  /** Reads the saved text, and keeps an edit that the user has begun. */
+  function loadGlobalInstructions(): void {
+    const current = ++globalInstructionsGeneration;
+    // The alert shows the result of the latest read only.
+    setState((draft) => {
+      draft.globalInstructionsLoadFailed = false;
+    });
+    settingsPort()
+      .getGlobalInstructions()
+      .then(({ text, storedFileInvalid }) => {
+        if (current !== globalInstructionsGeneration) return;
+        setState((draft) => {
+          if (draft.globalInstructions === draft.savedGlobalInstructions) draft.globalInstructions = text;
+          draft.savedGlobalInstructions = text;
+          draft.globalInstructionsLoaded = true;
+          draft.globalInstructionsLoadFailed = false;
+          draft.globalInstructionsStoredInvalid = storedFileInvalid === true;
+        });
+      })
+      .catch(() => {
+        if (current !== globalInstructionsGeneration) return;
+        // Before the first read that works, the editor and Save stay off, so no save can replace the
+        // stored text. After one, the editor keeps its text.
+        setState((draft) => {
+          draft.globalInstructionsLoadFailed = true;
+        });
+      });
+  }
+
+  function saveGlobalInstructions(): void {
+    if (state.globalInstructionsSaving) return;
+    const text = state.globalInstructions;
+    globalInstructionsGeneration += 1;
+    setState((draft) => {
+      draft.globalInstructionsSaving = true;
+    });
+    settingsPort()
+      .setGlobalInstructions({ text })
+      .then((saved) => {
+        setState((draft) => {
+          draft.savedGlobalInstructions = saved.text;
+          if (draft.globalInstructions === text) draft.globalInstructions = saved.text;
+          draft.globalInstructionsLoadFailed = false;
+          draft.globalInstructionsStoredInvalid = false;
+          draft.globalInstructionsSaving = false;
+        });
+        actionToast.success(t("settings.globalInstructions.saved"), { id: "settings-global-instructions-saved" });
+      })
+      .catch((error: unknown) => {
+        setState((draft) => {
+          draft.globalInstructionsSaving = false;
+        });
+        showGlobalInstructionsSaveFailure(error);
+      });
+  }
+
   function showList(): void {
     setState((draft) => {
       draft.setting = null;
@@ -89,8 +175,10 @@ export function createSettingsAgentsSection(options: {
   }
 
   createEffect(options.visible, (visible) => {
-    if (visible) load();
-    else showList();
+    if (visible) {
+      load();
+      loadGlobalInstructions();
+    } else showList();
   });
 
   function changeDefault(setting: AgentDefaultSetting, on: boolean): void {
@@ -122,6 +210,18 @@ export function createSettingsAgentsSection(options: {
         defaults={options.value().agentDefaults}
         steer={options.value().busyMessageMode === "steer"}
         setting={state.setting}
+        globalInstructions={state.globalInstructions}
+        savedGlobalInstructions={state.savedGlobalInstructions}
+        globalInstructionsLoaded={state.globalInstructionsLoaded}
+        globalInstructionsLoadFailed={state.globalInstructionsLoadFailed}
+        globalInstructionsStoredInvalid={state.globalInstructionsStoredInvalid}
+        globalInstructionsSaving={state.globalInstructionsSaving}
+        onGlobalInstructionsChange={(text) =>
+          setState((draft) => {
+            draft.globalInstructions = text;
+          })
+        }
+        onGlobalInstructionsSave={saveGlobalInstructions}
         menuMount={props.menuMount}
         onOpen={(setting) =>
           setState((draft) => {

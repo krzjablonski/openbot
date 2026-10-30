@@ -12,7 +12,7 @@ import { isString } from "@openbot/contracts/runtime-values";
 import { sourceText } from "@openbot/i18n/source";
 import { redactText } from "@openbot/logging";
 import { Effect, Exit, Fiber, Option, Schema, Scope } from "effect";
-import { secretElicitationField } from "./agent/prompts";
+import { INSTRUCTIONS_REPLACE_LINE, secretElicitationField } from "./agent/prompts";
 import { type AgentClient, type AgentProvider, type DiagnosticOrigin, RequestTimeoutError } from "./agent-client";
 import { type AgentCliInfo, cliPathEnvironment, cliSpawnTarget } from "./cli";
 import { runCauseEffect } from "./effect-boundary";
@@ -103,6 +103,12 @@ interface MuseThread {
   instructions: string;
   /** The instructions that the session already has, or null when the next turn must carry them. */
   instructionsSent: string | null;
+  /**
+   * The session was opened with `session/resume`, which loads its saved context, or a turn failed after
+   * a text was sent, and the context can still hold a text from before. Cleared when a turn with the
+   * instructions ends or a compaction.
+   */
+  restoredContext: boolean;
   roots: string[];
   mcp: LocalMcpSession;
   turn: MuseTurn | null;
@@ -550,6 +556,7 @@ export class MuseAgentClient extends EventEmitter<ClientEvents> implements Agent
         cwd,
         instructions: getString(params, "developerInstructions") ?? "",
         instructionsSent: null,
+        restoredContext: resume,
         roots: getArray(params, "runtimeWorkspaceRoots").filter(isString),
         mcp: bridge,
         turn: null,
@@ -624,7 +631,13 @@ export class MuseAgentClient extends EventEmitter<ClientEvents> implements Agent
     const input = compact ? [] : yield* musePrompt(params);
     // The session keeps the instructions in its context until a compaction replaces them.
     if (!compact && thread.instructions && thread.instructionsSent !== thread.instructions) {
-      input.unshift({ type: "text", text: thread.instructions });
+      // A changed text is sent again, or a resumed session gets its first one. The context can still
+      // hold the earlier text.
+      const replaces = thread.instructionsSent !== null || thread.restoredContext;
+      input.unshift({
+        type: "text",
+        text: replaces ? `${INSTRUCTIONS_REPLACE_LINE}\n${thread.instructions}` : thread.instructions,
+      });
       thread.instructionsSent = thread.instructions;
     }
     const workspaceRoots = compact ? [] : yield* museWorkspaceRoots([thread.cwd, ...thread.roots]);
@@ -728,8 +741,13 @@ export class MuseAgentClient extends EventEmitter<ClientEvents> implements Agent
     const turn = thread.turn;
     if (!turn) return;
     thread.turn = null;
-    // The session may not have kept the input of a turn that failed.
-    if (status === "failed" && !turn.compact) thread.instructionsSent = null;
+    // The session may not have kept the input of a turn that failed, but it can have kept a text from before.
+    if (status === "failed" && !turn.compact) {
+      if (thread.instructionsSent !== null) thread.restoredContext = true;
+      thread.instructionsSent = null;
+    }
+    // A resumed session that kept a text with the replace line needs the line no more.
+    else if (thread.instructionsSent !== null) thread.restoredContext = false;
     for (const controller of thread.approvals.values()) controller.abort();
     thread.approvals.clear();
     this.#emit("turn/completed", { threadId: thread.id, turn: { id: turn.id, status } });
@@ -833,7 +851,10 @@ export class MuseAgentClient extends EventEmitter<ClientEvents> implements Agent
     if (method === "item/started" || method === "item/updated" || method === "item/completed") {
       const event = yield* this.#decode(Schema.Struct({ item: MuseItem }), params);
       this.#publish(thread, event.item);
-      if (event.item.kind === "compaction" && event.item.status === "completed") thread.instructionsSent = null;
+      if (event.item.kind === "compaction" && event.item.status === "completed") {
+        thread.instructionsSent = null;
+        thread.restoredContext = false;
+      }
       if (thread.turn?.compact && event.item.kind === "compaction" && event.item.status !== "inProgress")
         this.#finish(
           thread,
